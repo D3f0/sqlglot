@@ -14,13 +14,14 @@ from sqlglot.dialects.dialect import (
     build_date_delta_with_interval,
     build_formatted_time,
     NormalizationStrategy,
-    date_add_sql,
     build_timetostr_or_tochar,
 )
+from sqlglot.dialects.mysql import date_add_sql
 
 
 class DB2(Dialect):
     DATE_FORMAT = "'yyyy-MM-dd'"
+    TIME_FORMAT = "'YYYY-MM-DD HH24:MI:SS'"
     NORMALIZATION_STRATEGY = NormalizationStrategy.UPPERCASE
 
     TIME_MAPPING = {
@@ -80,7 +81,7 @@ class DB2(Dialect):
         FUNCTIONS = {
             **parser.Parser.FUNCTIONS,
             "DATE_SUB": build_date_delta_with_interval(exp.DateSub),
-            "TO_CHAR": build_timetostr_or_tochar,
+            "TO_CHAR": lambda args, dialect=None: _build_to_char_db2(args, dialect),
             "DATE_ADD": build_date_delta_with_interval(exp.DateAdd),
             "DATE": lambda args: exp.TsOrDsToDate(this=seq_get(args, 0)),
             "CHAR": lambda self: self._parse_chr(),
@@ -181,8 +182,43 @@ class DB2(Dialect):
             this = expression.this
             return self.func("CURRENT_TIMESTAMP", this) if this else "CURRENT_TIMESTAMP"
 
-        def add_column_sql(self, expression: exp.Alter) -> str:
+        def lock_sql(self, expression: exp.Lock) -> str:
+            # DB2 supports FOR READ ONLY for read-only cursors
+            read_only = expression.args.get("read_only")
+            if read_only:
+                return "FOR READ ONLY"
+
+            # Fall back to the default implementation for other lock types
+            return super().lock_sql(expression)
+
+        def add_column_sql(self, expression: exp.Expression) -> str:
             actions = self.expressions(expression, key="actions", flat=True)
             if len(expression.args.get("actions", [])) > 1:
                 return f"ADD ({actions})"
             return f"ADD {actions}"
+
+
+def _build_to_char_db2(args: t.List, dialect: t.Optional[str] = None) -> exp.TimeToStr | exp.ToChar:
+    """Custom TO_CHAR handler for DB2 that handles temporal types without explicit format."""
+    if len(args) >= 2:
+        # If we have explicit format, use the standard handler
+        return build_timetostr_or_tochar(args, dialect or DB2)
+
+    if len(args) == 1:
+        arg = args[0]
+        # Check if the argument is a temporal type
+        if not arg.type:
+            from sqlglot.optimizer.annotate_types import annotate_types
+
+            annotate_types(arg, dialect=dialect or DB2)
+
+        if arg.is_type(*exp.DataType.TEMPORAL_TYPES):
+            # Create a TimeToStr with the default TIME_FORMAT for DB2
+            # Get the format string in Python format for internal representation
+            db2_class = DB2 if not isinstance(dialect, str) else DB2
+            return exp.TimeToStr(
+                this=arg,
+                format=db2_class.format_time(exp.Literal.string("YYYY-MM-DD HH24:MI:SS")),
+            )
+
+    return exp.ToChar.from_arg_list(args)

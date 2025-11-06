@@ -21,6 +21,13 @@ class TestDb2(Validator):
                 "postgres": "SELECT TO_CHAR(CAST('1999-12-01 10:00:00' AS TIMESTAMP), 'YYYY-MM-DD HH24:MI:SS')",
             },
         )
+        # Test TO_CHAR with explicit format
+        self.validate_all(
+            "SELECT TO_CHAR(TIMESTAMP '1999-12-01 10:00:00', 'YYYY-MM-DD HH24:MI:SS')",
+            write={
+                "postgres": "SELECT TO_CHAR(CAST('1999-12-01 10:00:00' AS TIMESTAMP), 'YYYY-MM-DD HH24:MI:SS')",
+            },
+        )
         self.validate_identity("SELECT TO_DATE('August 13, 2024, 1:00 A.M.')")
         self.validate_all("SELECT DISTINCT col1, col2 FROM table")
         self.validate_all("SELECT DISTINCT col2 FROM table ORDER BY CURRENT_DATE")
@@ -35,3 +42,5 @@ class TestDb2(Validator):
         self.validate_identity("CURRENT_TIMESTAMP")
         self.validate_identity("ALTER TABLE tbl_name DROP CONSTRAINT fk_symbol")
         self.validate_identity("SELECT x FROM t WHERE cond FETCH FIRST 10 ROWS ONLY")
+        self.validate_identity("SELECT * FROM t FOR READ ONLY")
+        self.validate_identity("SELECT a, b FROM table1 WHERE id > 10 FOR READ ONLY")
